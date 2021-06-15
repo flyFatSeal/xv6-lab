@@ -5,6 +5,6 @@
 int
 main(int argc, char *argv[])
 {
-  sleep(1);
+  sleep(300);
   exit(0);
 }
