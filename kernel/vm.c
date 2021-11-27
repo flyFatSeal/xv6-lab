@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "fs.h"
 
+
 /*
  * the kernel's page table.
  */
@@ -439,4 +440,30 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void vmprint_help(pagetable_t pagetable, int level){
+  if(level == 3)
+    return ;
+
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      char prev[512]="..";
+      for(int i=0,j=strlen(prev);i<level;i++) 
+      {
+            prev[j++]=' ';
+            prev[j++]='.';
+            prev[j++]='.';
+      }
+      printf("%s %d: pte %p pa %p \n", prev, i, pte, child);
+      vmprint_help((pagetable_t)child, level + 1);
+    }
+  }
+}
+
+void vmprint(pagetable_t pagetable){
+  vmprint_help(pagetable, 0);
 }
