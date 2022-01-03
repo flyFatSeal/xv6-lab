@@ -107,14 +107,15 @@ found:
   p->pagetable = proc_pagetable(p);
   // kernel page table
   p->kpagetable = proc_kpagetable();
-  if (p->pagetable == 0 || p->kpagetable == 0)
+  // kernel kstack
+  p->kstack = proc_kstack(p->kpagetable, (int)(p - proc));
+  if (p->pagetable == 0 || p->kpagetable == 0 || p->kstack == 0)
   {
     freeproc(p);
     release(&p->lock);
     return 0;
   }
-
-  p->kstack = proc_kstack(p->kpagetable, (int)(p-proc));
+  
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -201,15 +202,9 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 void
 proc_freekpagetable(pagetable_t kpagetable)
 {
-  uvmunmap(kpagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(kpagetable,UART0, 1, 0);
-  uvmunmap(kpagetable,VIRTIO0, 1, 0);
-  uvmunmap(kpagetable,CLINT, 0x10000 /PGSIZE , 0);
-  uvmunmap(kpagetable,PLIC, 0x400000 /PGSIZE, 0);
-  uvmunmap(kpagetable,KERNBASE, ((uint64)etext-KERNBASE)/PGSIZE , 0);
-  uvmunmap(kpagetable,(uint64)etext,  (PHYSTOP-(uint64)etext) / PGSIZE, 0);
-
-  freewalkwithoutleaf(kpagetable);
+  if((pagetable_t)PTE2PA(kpagetable[0]))
+    freewalkwithoutleaf((pagetable_t)PTE2PA(kpagetable[0]));
+  kfree((void *)(kpagetable));
 }
 
 void proc_freekstack(pagetable_t kpagetable,uint64 kstack){
@@ -239,7 +234,7 @@ userinit(void)
   
   // allocate one user page and copy init's instructions
   // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+  uvminit(p->pagetable,p->kpagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -264,11 +259,12 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz = uvmalloc(p->pagetable,p->kpagetable, sz, sz + n)) == 0) {
       return -1;
     }
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvmdealloc(p->kpagetable, sz, sz + n,1);
+    sz = uvmdealloc(p->pagetable, sz, sz + n,0);
   }
   p->sz = sz;
   return 0;
@@ -286,10 +282,16 @@ fork(void)
   // Allocate process.
   if((np = allocproc()) == 0){
     return -1;
-  }
+  }                                         
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  // Copy kernel usermapping 
+  if(kvmcopy(np->pagetable, np->kpagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
