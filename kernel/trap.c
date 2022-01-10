@@ -77,9 +77,25 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if( p->ticks != 0){
+      // exec alarm handler function
+      if(p->curtick == p->ticks && p->isalarm == 0){
+        memmove(p->alarmframe, p->trapframe, PGSIZE);
+        p->trapframe->epc = p->handler;
+        p->isalarm = 1;
+      }
+      else
+      {
+        if(p->isalarm == 0)
+          p->curtick += 1;
+        else
+          p->curtick = 0;
+      }
+    }
     yield();
-
+  }
+    
   usertrapret();
 }
 
@@ -125,7 +141,7 @@ usertrapret(void)
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 fn = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
+  ((void (*)(uint64, uint64))fn)(TRAPFRAME, satp);
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,
