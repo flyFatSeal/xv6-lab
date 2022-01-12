@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -101,12 +103,21 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
+  if(pte == 0){
     return 0;
-  if((*pte & PTE_V) == 0)
+  }
+    
+  if((*pte & PTE_V) == 0){
+    if(va < myproc()->sz){
+      lazyalloc(va);   
+      pte = walk(pagetable, va, 0);
+    }else
+      return 0;
+  }
+
+  if((*pte & PTE_U) == 0){
     return 0;
-  if((*pte & PTE_U) == 0)
-    return 0;
+  }
   pa = PTE2PA(*pte);
   return pa;
 }
@@ -159,6 +170,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if(*pte & PTE_V)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+    if(*pte == 0){
+      printf("NO");
+    }
     if(a == last)
       break;
     a += PGSIZE;
@@ -181,10 +195,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
+      continue;
+    if (PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
@@ -315,9 +329,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -439,4 +453,28 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void lazyalloc(uint64 va){
+    // page fault
+    struct proc *p = myproc();
+    uint64 a = PGROUNDDOWN(va);
+    if (a >= p->sz || a<= p->trapframe->sp){
+      p->killed = 1;
+      return;
+    }
+
+    // alloc page
+    char *mem = kalloc();
+    if (mem == 0)
+    {
+      p->killed = 1;
+      return;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      kfree(mem);
+      uvmdealloc(p->pagetable, va, a);
+      p->killed = 1;
+    }
 }
