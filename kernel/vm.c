@@ -311,7 +311,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -319,12 +318,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    pageref[PA2INDEX(pa)] += 1;
+    flags = PTE_FLAGS(*pte) & ~PTE_W;
+    *pte = (*pte &~ 0x3ff) | flags;
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
+    {
       goto err;
     }
   }
@@ -355,12 +353,20 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  int haswrite = 0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    // determine if process have write access
+    haswrite = PTE_FLAGS(PA2PTE(pa0)) & PTE_W;
+    if(haswrite == 0){
+      if(cowhandler(pagetable, va0) == 0)
+        return -1;
+      pa0 = walkaddr(pagetable, va0);
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -439,4 +445,33 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int cowhandler(pagetable_t pagetable,uint64 va){
+  pte_t *pte;
+  uint64 pa;
+  uint flags;
+  uint64 down = PGROUNDDOWN(va);
+
+  // get the readonly page address
+  if((pte = walk(pagetable, down, 0)) == 0)
+    panic("cowhandler: pte should exist");
+  if((*pte & PTE_V) == 0)
+    panic("cowhandler: page not present");
+  pa = PTE2PA(*pte);
+  flags = PTE_FLAGS(*pte) | PTE_W;
+  // alloc a new page and copy data
+  char *mem;
+  if ((mem = kalloc()) == 0)
+    return 0;
+  memmove(mem, (char*)pa, PGSIZE);
+
+  //map new page to process and reset PTE-W
+  *pte = PA2PTE(mem);
+  *pte = (*pte &~ 0x3ff) | flags;
+
+  //free old page
+  kfree((void *)pa);
+
+  return 1;
 }

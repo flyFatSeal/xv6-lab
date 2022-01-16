@@ -46,6 +46,10 @@
 // from physical address 0x80000000 to PHYSTOP.
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128*1024*1024)
+#define PAGECOUNT (128*1024*1024 / 4096)
+#define PA2INDEX(p) (((p)-KERNBASE) / 4096)
+
+extern int pageref[];
 
 // map the trampoline page to the highest address,
 // in both user and kernel space.
