@@ -132,53 +132,58 @@ bget(uint dev, uint blockno)
     cur = cur->down;
   }
 
-  release(&bcache.table[index].lock);
 
   for (b = bcache.head->next; b != bcache.head; b = b->next)
   {
-
-    if(b->refcnt == 0) {
-      b->dev = dev;
-      b->blockno = blockno;
-      b->valid = 0;
-      b->refcnt = 1;
-      // c-clock head point
-      bcache.head = b;
-
-      // hash list
-      if(b->bucket > -1 ){
-        acquire(&bcache.table[b->bucket].lock);
-        struct buf *bstart = bcache.table[b->bucket].start;
+    int bindex = b->bucket;
+    if (bindex != index && bindex > - 1)
+      acquire(&bcache.table[bindex].lock);
+    if(b->refcnt == 0 ){
+      // steal from other hash list
+      if(bindex > -1){
+        struct buf *bstart = bcache.table[bindex].start;
         struct buf *bcur = bstart;
         struct buf *bpre = NULL;
         while(bcur != NULL ){
           if(bcur->bufno == b->bufno){
-            // move other bucket linklist
             if(bpre != NULL){
-             bpre->down = bpre->down->down; 
+              bpre->down = bpre->down->down; 
             }
             if(bstart == bcur){
-              bcache.table[b->bucket].start = bcur->down;
+              bcache.table[bindex].start = bcur->down;
             }
             break;
           }
           bpre = bcur;
           bcur = bcur->down;
         }
-        release(&bcache.table[b->bucket].lock);
       }
-      // modify start bucket
-      acquire(&bcache.table[index].lock);
+
+      b->dev = dev;
+      b->blockno = blockno;
+      b->valid = 0;
+      b->refcnt = 1;
+      b->bucket = index; 
+      
+      // c-clock head point
+      bcache.head = b;
+      // modify cur bucket start pointer
       if(b != start)
         b->down = start;
-      b->bucket = index;
       bcache.table[index].start = b;
+
+      if (bindex != index && bindex > - 1)
+        release(&bcache.table[bindex].lock);
       release(&bcache.table[index].lock);
       release(&bcache.lock);
       acquiresleep(&b->lock);
       return b;
     }
+    if (bindex != index && bindex > - 1)
+      release(&bcache.table[bindex].lock);
   }
+
+  release(&bcache.table[index].lock);
 
   panic("bget: no buffers");
 }
@@ -214,21 +219,24 @@ brelse(struct buf *b)
     panic("brelse");
 
   releasesleep(&b->lock);
+
+  acquire(&bcache.table[b->bucket].lock);
   b->refcnt--;
+  release(&bcache.table[b->bucket].lock);
 }
 
 void
 bpin(struct buf *b) {
-  acquire(&bcache.lock);
+  acquire(&bcache.table[b->bucket].lock);
   b->refcnt++;
-  release(&bcache.lock);
+  release(&bcache.table[b->bucket].lock);
 }
 
 void
 bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+  acquire(&bcache.table[b->bucket].lock);
   b->refcnt--;
-  release(&bcache.lock);
+  release(&bcache.table[b->bucket].lock);
 }
 
 
