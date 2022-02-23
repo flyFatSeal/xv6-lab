@@ -10,5 +10,5 @@
 - [x] [Lab thread: Multithreading](https://github.com/flyFatSeal/xv6-lab/tree/thread)
 - [x] [Lab lock: locking](https://github.com/flyFatSeal/xv6-lab/tree/lock)
 - [x] [Lab fs: File system](https://github.com/flyFatSeal/xv6-lab/tree/fs)
-- [ ] [Lab mmap: Mmap](https://pdos.csail.mit.edu/6.828/2020/labs/mmap.html)
+- [x] [Lab mmap: Mmap](https://pdos.csail.mit.edu/6.828/2020/labs/mmap.html)
 - [ ] [Lab net: Network stack](https://pdos.csail.mit.edu/6.828/2020/labs/net.html)
