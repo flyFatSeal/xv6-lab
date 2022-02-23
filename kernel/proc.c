@@ -5,8 +5,13 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct cpu cpus[NCPU];
+
+struct mmap mmapslots[16];
 
 struct proc proc[NPROC];
 
@@ -273,9 +278,34 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+  // copy mmap to mmap struct
+  struct mmap *cur,*npcur;
+  for (cur = mmapslots; cur < mmapslots + NMMAP; cur++){
+    if(cur->pid == p->pid && cur->size > 0){
+      int findcopyslot = 0;
+      for (npcur = mmapslots; npcur < mmapslots + NMMAP; npcur++)
+      {
+        if (npcur->size == 0 && findcopyslot == 0)
+        {
+          npcur->address = cur->address;
+          npcur->fd = cur->fd;
+          npcur->file = cur->file;
+          npcur->flags = cur->flags;
+          npcur->npages = 0;
+          npcur->pid = np->pid;
+          npcur->prot = cur->prot;
+          npcur->size = cur->size;
+          // add file ref
+          npcur->file->ref += 1;
+          findcopyslot = 1;
+        }
+      }
+    }
+  }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0)
+  {
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -344,9 +374,20 @@ exit(int status)
   if(p == initproc)
     panic("init exiting");
 
+  // munmap proc file
+  struct mmap *cur;
+  for (cur = mmapslots; cur < mmapslots + NMMAP; cur++){
+    if(cur->pid == p->pid && cur->size > 0){
+      if(munmap(cur->address - cur->size,cur->size) < 0)
+        panic("exit munmap failed \n");
+    }
+  }
+
   // Close all open files.
-  for(int fd = 0; fd < NOFILE; fd++){
-    if(p->ofile[fd]){
+  for (int fd = 0; fd < NOFILE; fd++)
+  {
+    if (p->ofile[fd])
+    {
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;

@@ -12,6 +12,7 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "fcntl.h"
 
 struct devsw devsw[NDEV];
 struct {
@@ -178,5 +179,38 @@ filewrite(struct file *f, uint64 addr, int n)
   }
 
   return ret;
+}
+
+int 
+munmap(uint64 addr,uint64 length){
+  struct mmap *cur;
+  struct proc *p = myproc();
+  int pid = p->pid;
+  for (cur = mmapslots; cur < mmapslots+NMMAP; cur++)
+  {
+    if(cur->address - cur->size == addr && pid == cur->pid){
+      uint64 sz = cur->size - length;
+      if (sz < 0)
+        return -1;
+      cur->size = sz;
+      break;
+    }
+  }
+  if(cur->npages > 0){
+    if((cur->flags & MAP_SHARED) && (cur->prot & PROT_WRITE) ){
+    // write back to maped file 
+    // sometime the map region wouldn`t alloc page the npages would be zero
+      if(filewrite(cur->file, addr, length) != length){
+        return -1;
+      }
+    }
+    //free page
+    uvmunmap(p->pagetable, addr, length / PGSIZE, 1);
+    cur->npages -= length / PGSIZE;
+  }
+  if(cur->size == 0)
+    cur->file->ref -= 1;
+
+  return 0;
 }
 

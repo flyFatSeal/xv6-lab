@@ -18,6 +18,8 @@
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
+
+
 static int
 argfd(int n, int *pfd, struct file **pf)
 {
@@ -483,4 +485,62 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  int fd, length, prot, flags;
+  if(argint(1, &length) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(4, &fd) < 0){
+    return -1;
+  }
+  length = PGROUNDUP(length);
+  // get free mmap struct
+  struct mmap *cur;
+  int check = -1;
+  int pid = myproc()->pid;
+  uint64 lastva = MAXVA - (PGSIZE * 2);
+  for (int i = 0; i < NMMAP; i++)
+  {
+    cur = &mmapslots[i];
+    if (pid == cur->pid && lastva >= cur->address)
+    {
+      lastva = cur->address - cur->size;
+    }
+    if(cur->size == 0 && check == -1 ){
+      check = i;
+    }
+  }
+  if(check > -1){
+    // add file refcnt                                                                                                                                                                                                                                                            
+    struct file *file = myproc()->ofile[fd];
+    if(file->readable == 0 && (prot & PROT_READ) )
+      return -1;
+    if((file->writable == 0) && ((prot & PROT_WRITE) && (flags & MAP_SHARED)))
+      return -1;
+    file->ref += 1;
+    // free slot
+    mmapslots[check].pid = pid;
+    mmapslots[check].fd = fd;
+    mmapslots[check].file = file;
+    mmapslots[check].size = length;
+    mmapslots[check].address = lastva;
+    mmapslots[check].flags = flags;
+    mmapslots[check].prot = prot;
+
+    return lastva - length;
+  }
+
+  return -1;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr,length;
+  if(argaddr(0, &addr) < 0 || argaddr(1, &length) < 0){
+    return -1;
+  }
+  length = PGROUNDUP(length);
+  return munmap(addr, length);
 }

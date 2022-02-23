@@ -3,8 +3,11 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -67,7 +70,54 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if(r_scause() == 13 || r_scause() == 15){
+    uint64 va = r_stval();
+    struct proc *p = myproc();
+    uint64 a = PGROUNDDOWN(va) ;
+    char *mem = 0;
+    // get mmap file description
+    struct mmap *cur;
+    int pid = myproc()->pid;
+    char buffer[BSIZE];
+    uint64 off ;
+    for (cur = mmapslots; cur < mmapslots + NMMAP; cur++)
+    {
+      uint64 buttom = cur->address - cur->size;
+      // find the mmap
+      if(cur->pid == pid && (va < cur->address && va >= buttom)){
+        // alloc page
+        if((mem = kalloc()) == 0){
+          p->killed = 1;
+          break;
+        }
+        memset(mem, 0, PGSIZE);
+        // read content from map file
+        cur->npages += 1;
+        off = a - buttom;
+        for (int i = 0; i < PGSIZE; i += BSIZE)
+        {
+          memset(buffer, 0, BSIZE);
+          if(readi(cur->file->ip, 0, (uint64)&buffer, off + i, BSIZE) < 0){
+            p->killed = 1;
+          }
+          memmove(mem + i, buffer, BSIZE);
+        }
+        break;
+      }
+    }      
+    if(mem != 0){
+      if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        uvmdealloc(p->pagetable, va, a);
+        p->killed = 1;
+      } 
+    }else{
+      p->killed = 1;
+    }
+  }
+
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

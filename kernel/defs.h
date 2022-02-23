@@ -33,6 +33,7 @@ void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
+int             munmap(uint64 addr,uint64 length);
 
 // fs.c
 void            fsinit(int);
@@ -53,7 +54,6 @@ int             readi(struct inode*, int, uint64, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, int, uint64, uint, uint);
 void            itrunc(struct inode*);
-
 // ramdisk.c
 void            ramdiskinit(void);
 void            ramdiskintr(void);

@@ -26,7 +26,6 @@ struct cpu {
   int intena;                 // Were interrupts enabled before push_off()?
 };
 
-extern struct cpu cpus[NCPU];
 
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
@@ -104,3 +103,18 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+struct mmap {
+	  uint64 address; // 记录返回映射到进程的虚拟地址
+    int pid; // 进程编号
+    uint64 size; // mmap函数调用的size参数
+    int fd; // 文件描述符，需要在mmap调用中增加对应file 的refcnt避免被释放
+    struct file *file;
+    int prot; // 映射区域读写权限
+    int flags;// 映射内容 共享还是私有
+    int npages; // 实际使用了几个页面 -- 要后续释放的时候用
+};
+
+extern struct mmap mmapslots[NMMAP];
+
+extern struct cpu cpus[NCPU];
